@@ -172,6 +172,54 @@ async function executeStep(page, step) {
       throw new Error(`Unknown action: ${step.action}`);
   }
 }
+// GET DOM từ một trang cụ thể (dùng cho AI selector inference)
+app.get("/get-dom", async (req, res) => {
+  const url = req.query.url;
+
+  if (!url || typeof url !== "string") {
+    return res.status(400).json({ error: "Missing or invalid 'url' parameter" });
+  }
+
+  let browser;
+
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--no-zygote",
+        "--disable-gpu",
+      ],
+    });
+
+    const page = await browser.newPage();
+    await page.goto(url, { timeout: 15000, waitUntil: "domcontentloaded" });
+
+    const dom = await page.content();
+
+    await browser.close();
+
+    return res.json({ url, html: dom });
+  } catch (error) {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.error("Error closing browser:", closeError.message);
+      }
+    }
+
+    return res.status(500).json({
+      error: "Failed to retrieve DOM",
+      message: error.message,
+    });
+  }
+});
+
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Playwright Service running on port ${PORT}`);
