@@ -1,22 +1,30 @@
 FROM mcr.microsoft.com/playwright:v1.40.0-focal
 
+# Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy npm config
+COPY .npmrc ./
+
+# Copy package files first (for better caching)
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Clear npm cache and install dependencies
+RUN npm cache clean --force && \
+    npm ci --only=production --no-audit --no-fund
 
 # Copy source code
 COPY . .
 
-# Install browsers (Railway has good caching)
-RUN npx playwright install chromium
+# Install browsers
+RUN npx playwright install chromium --with-deps
 
-# Create non-root user for security
-RUN groupadd -r playwright && useradd -r -g playwright -G audio,video playwright
-RUN chown -R playwright:playwright /app
+# Create non-root user
+RUN groupadd -r playwright && \
+    useradd -r -g playwright -G audio,video playwright && \
+    chown -R playwright:playwright /app && \
+    chown -R playwright:playwright /ms-playwright
+
 USER playwright
 
 # Expose port

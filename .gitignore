@@ -4,3 +4,7 @@ npm-debug.log*
 .DS_Store
 test-results/
 playwright-report/
+*.log
+
+# Keep package-lock.json for Docker builds
+# !package-lock.json
