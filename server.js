@@ -1,44 +1,57 @@
 const express = require('express');
-const { chromium, firefox, webkit } = require('playwright');
+const { chromium } = require('playwright');
 const cors = require('cors');
-const helmet = require('helmet');
-require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
-// Main test execution endpoint
+// Test endpoint
 app.post('/execute-test', async (req, res) => {
-  const { testCase, browserType = 'chromium', headless = true } = req.body;
+  const { testCase } = req.body;
   
+  if (!testCase) {
+    return res.status(400).json({ 
+      error: 'testCase is required' 
+    });
+  }
+
   let browser;
+  const startTime = Date.now();
+  
   try {
-    // Launch browser
-    const browserEngine = getBrowserEngine(browserType);
-    browser = await browserEngine.launch({ 
-      headless,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'] // Railway compatibility
+    // Launch browser with Alpine-specific config
+    browser = await chromium.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu'
+      ]
     });
     
     const page = await browser.newPage();
-    
-    // Set viewport
     await page.setViewportSize({ width: 1280, height: 720 });
     
     const results = [];
     
     // Execute test steps
-    for (const [index, step] of testCase.steps.entries()) {
+    for (const [index, step] of (testCase.steps || []).entries()) {
       try {
         const stepResult = await executeStep(page, step);
         results.push({
@@ -55,17 +68,8 @@ app.post('/execute-test', async (req, res) => {
           error: error.message
         });
         
-        // Take screenshot on failure
-        if (step.screenshotOnFail !== false) {
-          const screenshot = await page.screenshot({ 
-            encoding: 'base64',
-            fullPage: true 
-          });
-          results[results.length - 1].screenshot = screenshot;
-        }
-        
-        // Continue or stop on failure
-        if (step.stopOnFail !== false) {
+        // Stop on failure by default
+        if (step.continueOnFail !== true) {
           break;
         }
       }
@@ -76,7 +80,7 @@ app.post('/execute-test', async (req, res) => {
     const overallStatus = results.every(r => r.status === 'passed') ? 'passed' : 'failed';
     
     res.json({
-      testName: testCase.name,
+      testName: testCase.name || 'Unnamed Test',
       status: overallStatus,
       duration: Date.now() - startTime,
       results,
@@ -84,7 +88,13 @@ app.post('/execute-test', async (req, res) => {
     });
     
   } catch (error) {
-    if (browser) await browser.close();
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.error('Error closing browser:', closeError.message);
+      }
+    }
     
     res.status(500).json({
       status: 'error',
@@ -94,126 +104,78 @@ app.post('/execute-test', async (req, res) => {
   }
 });
 
-// Batch test execution
-app.post('/execute-batch', async (req, res) => {
-  const { testCases, browserType = 'chromium' } = req.body;
-  const results = [];
-  
-  for (const testCase of testCases) {
-    try {
-      const result = await executeTestCase(testCase, browserType);
-      results.push(result);
-    } catch (error) {
-      results.push({
-        testName: testCase.name,
-        status: 'error',
-        error: error.message
-      });
-    }
-  }
-  
-  res.json({
-    batchStatus: 'completed',
-    totalTests: testCases.length,
-    passed: results.filter(r => r.status === 'passed').length,
-    failed: results.filter(r => r.status === 'failed').length,
-    results
-  });
-});
-
-// Helper functions
-function getBrowserEngine(browserType) {
-  switch (browserType.toLowerCase()) {
-    case 'firefox': return firefox;
-    case 'webkit': return webkit;
-    case 'safari': return webkit;
-    default: return chromium;
-  }
-}
-
+// Helper function to execute individual steps
 async function executeStep(page, step) {
-  const startTime = Date.now();
-  
-  switch (step.action.toLowerCase()) {
+  switch (step.action?.toLowerCase()) {
     case 'goto':
-      await page.goto(step.url, { waitUntil: 'networkidle' });
+      await page.goto(step.url, { waitUntil: 'networkidle', timeout: 30000 });
       return { url: page.url() };
       
     case 'click':
-      await page.click(step.selector);
+      await page.click(step.selector, { timeout: 10000 });
       return { clicked: step.selector };
       
     case 'fill':
     case 'type':
-      await page.fill(step.selector, step.value);
+      await page.fill(step.selector, step.value, { timeout: 10000 });
       return { filled: step.selector, value: step.value };
-      
-    case 'select':
-      await page.selectOption(step.selector, step.value);
-      return { selected: step.selector, value: step.value };
       
     case 'wait':
       if (step.selector) {
-        await page.waitForSelector(step.selector, { timeout: step.timeout || 30000 });
+        await page.waitForSelector(step.selector, { timeout: step.timeout || 10000 });
+        return { waited: 'for selector: ' + step.selector };
       } else {
         await page.waitForTimeout(step.timeout || 1000);
+        return { waited: step.timeout + 'ms' };
       }
-      return { waited: step.timeout || 'for selector' };
       
     case 'screenshot':
       const screenshot = await page.screenshot({ 
         encoding: 'base64',
         fullPage: step.fullPage || false 
       });
-      return { screenshot };
+      return { screenshot: screenshot.substring(0, 100) + '...' }; // Truncate for response
       
     case 'expect':
     case 'assert':
-      return await executeAssertion(page, step);
-      
-    case 'scroll':
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-      return { scrolled: 'to bottom' };
-      
-    case 'hover':
-      await page.hover(step.selector);
-      return { hovered: step.selector };
-      
-    case 'press':
-      await page.press(step.selector || 'body', step.key);
-      return { pressed: step.key };
+      const element = page.locator(step.selector);
+      switch (step.assertionType) {
+        case 'toHaveText':
+          const text = await element.textContent();
+          if (text !== step.expectedValue) {
+            throw new Error(`Expected "${step.expectedValue}", got "${text}"`);
+          }
+          return { assertion: 'text matches', actual: text };
+          
+        case 'toBeVisible':
+          const visible = await element.isVisible();
+          if (!visible) {
+            throw new Error('Element is not visible');
+          }
+          return { assertion: 'element is visible' };
+          
+        default:
+          throw new Error(`Unknown assertion: ${step.assertionType}`);
+      }
       
     default:
       throw new Error(`Unknown action: ${step.action}`);
   }
 }
 
-async function executeAssertion(page, step) {
-  const element = step.selector ? page.locator(step.selector) : page;
-  
-  switch (step.assertionType) {
-    case 'toHaveText':
-      await expect(element).toHaveText(step.expectedValue);
-      return { assertion: 'text matches', value: step.expectedValue };
-      
-    case 'toBeVisible':
-      await expect(element).toBeVisible();
-      return { assertion: 'element is visible' };
-      
-    case 'toHaveURL':
-      await expect(page).toHaveURL(step.expectedValue);
-      return { assertion: 'URL matches', value: step.expectedValue };
-      
-    case 'toHaveTitle':
-      await expect(page).toHaveTitle(step.expectedValue);
-      return { assertion: 'title matches', value: step.expectedValue };
-      
-    default:
-      throw new Error(`Unknown assertion: ${step.assertionType}`);
-  }
-}
-
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(` Playwright Service running on port ${PORT}`);
-  console.log(` Health check: http://localhost:${PORT}/health`);
+  console.log(`🚀 Playwright Service running on port ${PORT}`);
+  console.log(`📊 Health check: http://localhost:${PORT}/health`);
+  console.log(`🐳 Environment: ${process.env.NODE_ENV || 'development'}`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully'); 
+  process.exit(0);
 });

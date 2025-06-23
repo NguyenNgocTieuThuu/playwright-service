@@ -1,38 +1,35 @@
-FROM mcr.microsoft.com/playwright:v1.40.0-focal
+FROM node:18-alpine
 
-# Set working directory
+# Install dependencies for Playwright
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont
+
+# Tell Playwright to use installed Chromium
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
 WORKDIR /app
 
-# Copy npm config
-COPY .npmrc ./
-
-# Copy package files first (for better caching)
+# Copy package files
 COPY package*.json ./
 
-# Clear npm cache and install dependencies
-RUN npm cache clean --force && \
-    npm ci --only=production --no-audit --no-fund
+# Install Node dependencies
+RUN npm install --production
 
 # Copy source code
 COPY . .
 
-# Install browsers
-RUN npx playwright install chromium --with-deps
-
 # Create non-root user
-RUN groupadd -r playwright && \
-    useradd -r -g playwright -G audio,video playwright && \
-    chown -R playwright:playwright /app && \
-    chown -R playwright:playwright /ms-playwright
-
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S playwright -u 1001
+RUN chown -R playwright:nodejs /app
 USER playwright
 
-# Expose port
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:3000/health || exit 1
-
-# Start server
 CMD ["npm", "start"]
