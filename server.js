@@ -172,13 +172,26 @@ async function executeStep(page, step) {
       throw new Error(`Unknown action: ${step.action}`);
   }
 }
-// GET DOM từ một trang cụ thể (dùng cho AI selector inference)
+//api get dom
 app.get("/get-dom", async (req, res) => {
   const url = req.query.url;
 
   if (!url || typeof url !== "string") {
     return res.status(400).json({ error: "Missing or invalid 'url' parameter" });
   }
+
+  const pageReadySelectors = [
+    { keyword: "/auth/login", selector: 'input[name="username"]' },
+    { keyword: "/pim", selector: 'h6:has-text("PIM")' },
+    { keyword: "/leave", selector: 'h6:has-text("Leave")' },
+    { keyword: "/recruitment", selector: 'h6:has-text("Recruitment")' },
+    { keyword: "/dashboard", selector: 'h6:has-text("Dashboard")' },
+    { keyword: "/addEmployee", selector: 'input[name="firstName"]' },
+    { keyword: "/carpim", selector: 'div.oxd-table' },
+  ];
+
+  const waitSelector =
+    pageReadySelectors.find((entry) => url.includes(entry.keyword))?.selector || "body";
 
   let browser;
 
@@ -197,10 +210,12 @@ app.get("/get-dom", async (req, res) => {
     });
 
     const page = await browser.newPage();
-    await page.goto(url, { timeout: 15000, waitUntil: "domcontentloaded" });
+    await page.goto(url, { timeout: 15000, waitUntil: "networkidle" });
+
+    // Đợi selector phù hợp
+    await page.waitForSelector(waitSelector, { timeout: 5000 });
 
     const dom = await page.content();
-
     await browser.close();
 
     return res.json({ url, html: dom });
@@ -219,6 +234,7 @@ app.get("/get-dom", async (req, res) => {
     });
   }
 });
+
 
 
 app.listen(PORT, "0.0.0.0", () => {
