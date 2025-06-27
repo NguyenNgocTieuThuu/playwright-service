@@ -17,7 +17,7 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Test endpoint
+// Test endpoint (unchanged)
 app.post("/execute-test", async (req, res) => {
   const { testCase } = req.body;
 
@@ -31,7 +31,6 @@ app.post("/execute-test", async (req, res) => {
   const startTime = Date.now();
 
   try {
-    // Launch browser with Alpine-specific config
     browser = await chromium.launch({
       headless: true,
       args: [
@@ -50,7 +49,6 @@ app.post("/execute-test", async (req, res) => {
 
     const results = [];
 
-    // Execute test steps
     for (const [index, step] of (testCase.steps || []).entries()) {
       try {
         const stepResult = await executeStep(page, step);
@@ -68,7 +66,6 @@ app.post("/execute-test", async (req, res) => {
           error: error.message,
         });
 
-        // Stop on failure by default
         if (step.continueOnFail !== true) {
           break;
         }
@@ -105,7 +102,7 @@ app.post("/execute-test", async (req, res) => {
   }
 });
 
-// Helper function to execute individual steps
+// Helper function to execute individual steps (unchanged)
 async function executeStep(page, step) {
   switch (step.action?.toLowerCase()) {
     case "goto":
@@ -137,13 +134,10 @@ async function executeStep(page, step) {
         encoding: "base64",
         fullPage: step.fullPage || false,
       });
-
-      // Đảm bảo screenshot là string
       const screenshotStr =
         typeof screenshot === "string"
           ? screenshot
           : screenshot.toString("base64");
-
       return { screenshot: screenshotStr.substring(0, 100) + "..." };
 
     case "expect":
@@ -172,35 +166,39 @@ async function executeStep(page, step) {
       throw new Error(`Unknown action: ${step.action}`);
   }
 }
+
+// Updated /get-dom endpoint
 app.get("/get-dom", async (req, res) => {
   const url = req.query.url;
 
   if (!url || typeof url !== "string") {
-    return res.status(400).json({ error: "Missing or invalid 'url' parameter" });
+    return res
+      .status(400)
+      .json({ error: "Missing or invalid 'url' parameter" });
   }
 
-  // Danh sách các chức năng chính và selector tương ứng
   const domTargets = [
-    { keyword: "/auth/login", selector: "form.oxd-form" },                         // Đăng nhập
-    { keyword: "/dashboard", selector: "div.oxd-dashboard-widget" },              // Dashboard chính
-    { keyword: "/pim/viewEmployeeList", selector: "div.oxd-table" },              // PIM - danh sách nhân viên
-    { keyword: "/pim/addEmployee", selector: "form.oxd-form" },                   // PIM - thêm nhân viên
-    { keyword: "/leave/viewLeaveList", selector: "div.oxd-table" },               // Leave - danh sách nghỉ phép
-    { keyword: "/leave/applyLeave", selector: "form.oxd-form" },                  // Leave - form apply nghỉ
-    { keyword: "/recruitment/viewCandidates", selector: "div.oxd-table" },        // Tuyển dụng
-    { keyword: "/time/viewEmployeeTimesheet", selector: "form.oxd-form" },        // Timesheet
-    { keyword: "/performance/searchKpi", selector: "form.oxd-form" },             // KPI
-    { keyword: "/admin/viewSystemUsers", selector: "div.oxd-table" },             // Admin - Users
-    { keyword: "/admin/saveSystemUser", selector: "form.oxd-form" },              // Admin - Add user
-    { keyword: "/maintenance/purgeEmployee", selector: "form.oxd-form" },         // Maintenance
-    { keyword: "/claim/viewAssignClaim", selector: "div.oxd-table" },             // Claim
-    { keyword: "/buzz/viewBuzz", selector: "div.orangehrm-buzz-newsfeed" },       // Buzz
-    { keyword: "/myinfo", selector: "form.oxd-form" },                             // Hồ sơ cá nhân
-    // fallback
-    { keyword: "default", selector: "body" }
+    { keyword: "/auth/login", selector: "form.oxd-form" },
+    { keyword: "/dashboard", selector: "div.oxd-dashboard-widget" },
+    { keyword: "/pim/viewEmployeeList", selector: "div.oxd-table" },
+    { keyword: "/pim/addEmployee", selector: "form.oxd-form" },
+    { keyword: "/leave/viewLeaveList", selector: "div.oxd-table" },
+    { keyword: "/leave/applyLeave", selector: "form.oxd-form" },
+    { keyword: "/recruitment/viewCandidates", selector: "div.oxd-table" },
+    { keyword: "/time/viewEmployeeTimesheet", selector: "form.oxd-form" },
+    { keyword: "/performance/searchKpi", selector: "form.oxd-form" },
+    { keyword: "/admin/viewSystemUsers", selector: "div.oxd-table" },
+    { keyword: "/admin/saveSystemUser", selector: "form.oxd-form" },
+    { keyword: "/maintenance/purgeEmployee", selector: "form.oxd-form" },
+    { keyword: "/claim/viewAssignClaim", selector: "div.oxd-table" },
+    { keyword: "/buzz/viewBuzz", selector: "div.orangehrm-buzz-newsfeed" },
+    { keyword: "/myinfo", selector: "form.oxd-form" },
+    { keyword: "default", selector: "body" },
   ];
 
-  const match = domTargets.find(entry => url.includes(entry.keyword)) || domTargets.find(e => e.keyword === "default");
+  const match =
+    domTargets.find((entry) => url.includes(entry.keyword)) ||
+    domTargets.find((e) => e.keyword === "default");
   const selector = match.selector;
 
   let browser;
@@ -214,31 +212,67 @@ app.get("/get-dom", async (req, res) => {
         "--disable-accelerated-2d-canvas",
         "--no-first-run",
         "--no-zygote",
-        "--disable-gpu"
+        "--disable-gpu",
       ],
+      timeout: 60000, // Tăng timeout khởi động browser
     });
 
-    const page = await browser.newPage();
-    await page.goto(url, { timeout: 15000, waitUntil: "networkidle" });
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 720 },
+      ignoreHTTPSErrors: true, // Bỏ qua lỗi HTTPS nếu có
+    });
 
-    await page.waitForSelector(selector, { timeout: 5000 });
+    const page = await context.newPage();
 
-    // Chỉ lấy DOM focus, không lấy toàn trang
-    const focusedDom = await page.locator(selector).evaluate(el => el.outerHTML);
+    // Tăng timeout cho goto và waitUntil
+    await page.goto(url, {
+      waitUntil: "networkidle",
+      timeout: 45000, // Tăng lên 45 giây
+    });
+
+    // Thử đợi selector với retry và timeout dài hơn
+    const maxRetries = 3;
+    let focusedDom = null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await page.waitForLoadState("networkidle", { timeout: 30000 });
+        focusedDom = await page
+          .locator(selector)
+          .evaluate((el) => el.outerHTML, { timeout: 30000 });
+        break;
+      } catch (error) {
+        console.log(`Attempt ${attempt} failed: ${error.message}`);
+        if (attempt === maxRetries) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 5000)); // Chờ 5 giây trước khi thử lại
+      }
+    }
+
+    if (!focusedDom) {
+      throw new Error(
+        `Selector ${selector} not found after ${maxRetries} attempts`
+      );
+    }
 
     await browser.close();
 
     return res.json({
       url,
       selectorUsed: selector,
-      html: focusedDom
+      html: focusedDom,
     });
   } catch (error) {
-    if (browser) await browser.close().catch(() => {});
-    return res.status(500).json({ error: "Failed to retrieve DOM", message: error.message });
+    if (browser) {
+      await browser
+        .close()
+        .catch((e) => console.error("Error closing browser:", e));
+    }
+    return res.status(500).json({
+      error: "Failed to retrieve DOM",
+      message: error.message,
+      callLog: error.stack || "No call log available",
+    });
   }
 });
-
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Playwright Service running on port ${PORT}`);
@@ -246,7 +280,6 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`🐳 Environment: ${process.env.NODE_ENV || "development"}`);
 });
 
-// Graceful shutdown
 process.on("SIGTERM", () => {
   console.log("SIGTERM received, shutting down gracefully");
   process.exit(0);
