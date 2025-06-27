@@ -172,7 +172,6 @@ async function executeStep(page, step) {
       throw new Error(`Unknown action: ${step.action}`);
   }
 }
-//api get dom
 app.get("/get-dom", async (req, res) => {
   const url = req.query.url;
 
@@ -180,21 +179,31 @@ app.get("/get-dom", async (req, res) => {
     return res.status(400).json({ error: "Missing or invalid 'url' parameter" });
   }
 
-  const pageReadySelectors = [
-    { keyword: "/auth/login", selector: 'input[name="username"]' },
-    { keyword: "/pim", selector: 'h6:has-text("PIM")' },
-    { keyword: "/leave", selector: 'h6:has-text("Leave")' },
-    { keyword: "/recruitment", selector: 'h6:has-text("Recruitment")' },
-    { keyword: "/dashboard", selector: 'h6:has-text("Dashboard")' },
-    { keyword: "/addEmployee", selector: 'input[name="firstName"]' },
-    { keyword: "/carpim", selector: 'div.oxd-table' },
+  // Danh sách các chức năng chính và selector tương ứng
+  const domTargets = [
+    { keyword: "/auth/login", selector: "form.oxd-form" },                         // Đăng nhập
+    { keyword: "/dashboard", selector: "div.oxd-dashboard-widget" },              // Dashboard chính
+    { keyword: "/pim/viewEmployeeList", selector: "div.oxd-table" },              // PIM - danh sách nhân viên
+    { keyword: "/pim/addEmployee", selector: "form.oxd-form" },                   // PIM - thêm nhân viên
+    { keyword: "/leave/viewLeaveList", selector: "div.oxd-table" },               // Leave - danh sách nghỉ phép
+    { keyword: "/leave/applyLeave", selector: "form.oxd-form" },                  // Leave - form apply nghỉ
+    { keyword: "/recruitment/viewCandidates", selector: "div.oxd-table" },        // Tuyển dụng
+    { keyword: "/time/viewEmployeeTimesheet", selector: "form.oxd-form" },        // Timesheet
+    { keyword: "/performance/searchKpi", selector: "form.oxd-form" },             // KPI
+    { keyword: "/admin/viewSystemUsers", selector: "div.oxd-table" },             // Admin - Users
+    { keyword: "/admin/saveSystemUser", selector: "form.oxd-form" },              // Admin - Add user
+    { keyword: "/maintenance/purgeEmployee", selector: "form.oxd-form" },         // Maintenance
+    { keyword: "/claim/viewAssignClaim", selector: "div.oxd-table" },             // Claim
+    { keyword: "/buzz/viewBuzz", selector: "div.orangehrm-buzz-newsfeed" },       // Buzz
+    { keyword: "/myinfo", selector: "form.oxd-form" },                             // Hồ sơ cá nhân
+    // fallback
+    { keyword: "default", selector: "body" }
   ];
 
-  const waitSelector =
-    pageReadySelectors.find((entry) => url.includes(entry.keyword))?.selector || "body";
+  const match = domTargets.find(entry => url.includes(entry.keyword)) || domTargets.find(e => e.keyword === "default");
+  const selector = match.selector;
 
   let browser;
-
   try {
     browser = await chromium.launch({
       headless: true,
@@ -205,36 +214,30 @@ app.get("/get-dom", async (req, res) => {
         "--disable-accelerated-2d-canvas",
         "--no-first-run",
         "--no-zygote",
-        "--disable-gpu",
+        "--disable-gpu"
       ],
     });
 
     const page = await browser.newPage();
     await page.goto(url, { timeout: 15000, waitUntil: "networkidle" });
 
-    // Đợi selector phù hợp
-    await page.waitForSelector(waitSelector, { timeout: 5000 });
+    await page.waitForSelector(selector, { timeout: 5000 });
 
-    const dom = await page.content();
+    // Chỉ lấy DOM focus, không lấy toàn trang
+    const focusedDom = await page.locator(selector).evaluate(el => el.outerHTML);
+
     await browser.close();
 
-    return res.json({ url, html: dom });
-  } catch (error) {
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (closeError) {
-        console.error("Error closing browser:", closeError.message);
-      }
-    }
-
-    return res.status(500).json({
-      error: "Failed to retrieve DOM",
-      message: error.message,
+    return res.json({
+      url,
+      selectorUsed: selector,
+      html: focusedDom
     });
+  } catch (error) {
+    if (browser) await browser.close().catch(() => {});
+    return res.status(500).json({ error: "Failed to retrieve DOM", message: error.message });
   }
 });
-
 
 
 app.listen(PORT, "0.0.0.0", () => {
