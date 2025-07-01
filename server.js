@@ -17,7 +17,7 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Updated /execute-test endpoint
+// Test endpoint
 app.post("/execute-test", async (req, res) => {
   const { testCase } = req.body;
 
@@ -171,8 +171,6 @@ async function executeStep(page, step) {
       throw new Error(`Unknown action: ${step.action}`);
   }
 }
-
-// /get-dom endpoint (unchanged)
 app.get("/get-dom", async (req, res) => {
   const url = req.query.url;
 
@@ -219,42 +217,15 @@ app.get("/get-dom", async (req, res) => {
         "--no-zygote",
         "--disable-gpu",
       ],
-      timeout: 60000,
     });
 
-    const context = await browser.newContext({
-      viewport: { width: 1280, height: 720 },
-      ignoreHTTPSErrors: true,
-    });
+    const page = await browser.newPage();
+    await page.goto(url, { timeout: 15000, waitUntil: "networkidle" });
 
-    const page = await context.newPage();
+    await page.waitForSelector(selector, { timeout: 5000 });
 
-    await page.goto(url, {
-      waitUntil: "networkidle",
-      timeout: 45000,
-    });
-
-    const maxRetries = 3;
-    let focusedDom = null;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        await page.waitForLoadState("networkidle", { timeout: 30000 });
-        focusedDom = await page
-          .locator(selector)
-          .evaluate((el) => el.outerHTML, { timeout: 30000 });
-        break;
-      } catch (error) {
-        console.log(`Attempt ${attempt} failed: ${error.message}`);
-        if (attempt === maxRetries) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-      }
-    }
-
-    if (!focusedDom) {
-      throw new Error(
-        `Selector ${selector} not found after ${maxRetries} attempts`
-      );
-    }
+    // Chỉ lấy DOM focus, không lấy toàn trang
+    const focusedDom = await page.locator(selector).evaluate(el => el.outerHTML);
 
     await browser.close();
 
