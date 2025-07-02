@@ -180,30 +180,6 @@ app.get("/get-dom", async (req, res) => {
       .json({ error: "Missing or invalid 'url' parameter" });
   }
 
-  const domTargets = [
-    { keyword: "/auth/login", selector: "form.oxd-form" },
-    { keyword: "/dashboard", selector: "div.oxd-dashboard-widget" },
-    { keyword: "/pim/viewEmployeeList", selector: "div.oxd-table" },
-    { keyword: "/pim/addEmployee", selector: "form.oxd-form" },
-    { keyword: "/leave/viewLeaveList", selector: "div.oxd-table" },
-    { keyword: "/leave/applyLeave", selector: "form.oxd-form" },
-    { keyword: "/recruitment/viewCandidates", selector: "div.oxd-table" },
-    { keyword: "/time/viewEmployeeTimesheet", selector: "form.oxd-form" },
-    { keyword: "/performance/searchKpi", selector: "form.oxd-form" },
-    { keyword: "/admin/viewSystemUsers", selector: "div.oxd-table" },
-    { keyword: "/admin/saveSystemUser", selector: "form.oxd-form" },
-    { keyword: "/maintenance/purgeEmployee", selector: "form.oxd-form" },
-    { keyword: "/claim/viewAssignClaim", selector: "div.oxd-table" },
-    { keyword: "/buzz/viewBuzz", selector: "div.orangehrm-buzz-newsfeed" },
-    { keyword: "/myinfo", selector: "form.oxd-form" },
-    { keyword: "default", selector: "body" },
-  ];
-
-  const match =
-    domTargets.find((entry) => url.includes(entry.keyword)) ||
-    domTargets.find((e) => e.keyword === "default");
-  const selector = match.selector;
-
   let browser;
   try {
     browser = await chromium.launch({
@@ -220,19 +196,16 @@ app.get("/get-dom", async (req, res) => {
     });
 
     const page = await browser.newPage();
-    await page.goto(url, { timeout: 15000, waitUntil: "networkidle" });
+    await page.goto(url, { timeout: 20000, waitUntil: "networkidle" });
 
-    await page.waitForSelector(selector, { timeout: 5000 });
-
-    // Chỉ lấy DOM focus, không lấy toàn trang
-    const focusedDom = await page.locator(selector).evaluate(el => el.outerHTML);
+    // ✅ Lấy toàn bộ DOM
+    const fullDom = await page.content();
 
     await browser.close();
 
     return res.json({
       url,
-      selectorUsed: selector,
-      html: focusedDom,
+      html: fullDom,
     });
   } catch (error) {
     if (browser) {
